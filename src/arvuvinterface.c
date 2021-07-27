@@ -49,7 +49,8 @@ typedef struct {
 static ArvUvInterfaceDeviceInfos *
 arv_uv_interface_device_infos_new (const char *manufacturer,
 				   const char *product,
-				   const char *serial_nbr)
+				   const char *serial_nbr,
+				   const char *device_addr)
 {
 	ArvUvInterfaceDeviceInfos *infos;
 
@@ -59,10 +60,10 @@ arv_uv_interface_device_infos_new (const char *manufacturer,
 
 	infos = g_new (ArvUvInterfaceDeviceInfos, 1);
 	infos->manufacturer = g_strdup (manufacturer);
-	infos->name = g_strdup_printf ("%s-%s", arv_vendor_alias_lookup (manufacturer), serial_nbr);
+	infos->name = g_strdup_printf ("%s-%s-%s", arv_vendor_alias_lookup (manufacturer), serial_nbr, device_addr);
 	infos->full_name = g_strdup_printf ("%s-%s", manufacturer, serial_nbr);
 	infos->product = g_strdup (product);
-	infos->serial_nbr = g_strdup (serial_nbr);
+	infos->serial_nbr = g_strdup_printf ("%s-%s", serial_nbr, device_addr);
 	infos->ref_count = 1;
 
 	arv_str_strip (infos->name, ARV_DEVICE_NAME_ILLEGAL_CHARACTERS, ARV_DEVICE_NAME_REPLACEMENT_CHARACTER);
@@ -203,6 +204,8 @@ _usb_device_to_device_ids (ArvUvInterface *uv_interface, libusb_device *device)
 		unsigned char *product;
 		unsigned char *serial_nbr;
 		int index;
+		unsigned char daddr;
+		unsigned char device_addr[2];
 
 		device_ids = g_new0 (ArvInterfaceDeviceIds, 1);
 
@@ -219,8 +222,12 @@ _usb_device_to_device_ids (ArvUvInterface *uv_interface, libusb_device *device)
 		index = desc.iSerialNumber;
 		if (index > 0)
 			libusb_get_string_descriptor_ascii (device_handle, index, serial_nbr, 256);
+		
+		daddr = libusb_get_device_address (device);
+		device_addr[0] = '0' + daddr;
+		device_addr[1] = (unsigned char)0;
 
-		device_infos = arv_uv_interface_device_infos_new ((char *) manufacturer, (char *) product, (char *) serial_nbr);
+		device_infos = arv_uv_interface_device_infos_new ((char *) manufacturer, (char *) product, (char *) serial_nbr, (char*)device_addr);
 		g_hash_table_replace (uv_interface->priv->devices, device_infos->name,
 				      arv_uv_interface_device_infos_ref (device_infos));
 		g_hash_table_replace (uv_interface->priv->devices, device_infos->full_name,
@@ -232,7 +239,7 @@ _usb_device_to_device_ids (ArvUvInterface *uv_interface, libusb_device *device)
 		device_ids->address = g_strdup ("USB3");	/* FIXME */
 		device_ids->vendor = g_strdup (device_infos->manufacturer);
 		device_ids->model = g_strdup (device_infos->product);
-		device_ids->serial_nbr = g_strdup (device_infos->serial_nbr);
+		device_ids->serial_nbr = g_strdup_printf ("%s-%s", device_infos->serial_nbr, device_addr);
 
 		g_free (manufacturer);
 		g_free (product);

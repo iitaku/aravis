@@ -650,6 +650,7 @@ _open_usb_device (ArvUvDevice *uv_device, GError **error)
 			unsigned char *product;
 			unsigned char *serial_number;
 			int index;
+			unsigned char device_addr[2];
 
 			manufacturer = g_malloc0 (256);
 			product = g_malloc0 (256);
@@ -665,9 +666,12 @@ _open_usb_device (ArvUvDevice *uv_device, GError **error)
 			if (index > 0)
 				libusb_get_string_descriptor_ascii (usb_device, index, serial_number, 256);
 
+			device_addr[0] = libusb_get_device_address(devices[i]) + '0';
+			device_addr[1] = 0;
+
 			if (g_strcmp0 ((char * ) manufacturer, priv->vendor) == 0 &&
 			    g_strcmp0 ((char * ) product, priv->product) == 0 &&
-			    g_strcmp0 ((char * ) serial_number, priv->serial_number) == 0) {
+			    g_strcmp0 ((char * ) g_strdup_printf("%s-%s", serial_number, device_addr), priv->serial_number) == 0) {
 				struct libusb_config_descriptor *config;
 				struct libusb_endpoint_descriptor endpoint;
 				const struct libusb_interface *inter;
