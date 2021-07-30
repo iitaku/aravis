@@ -92,11 +92,12 @@ void arv_uv_device_fill_bulk_transfer (struct libusb_transfer* transfer, ArvUvDe
 				libusb_transfer_cb_fn callback, void* callback_data,
 				unsigned int timeout)
 {
+	ArvUvDevicePrivate *priv = arv_uv_device_get_instance_private (uv_device);
 	guint8 endpoint;
 
-	endpoint = (endpoint_type == ARV_UV_ENDPOINT_CONTROL) ? uv_device->priv->control_endpoint : uv_device->priv->data_endpoint;
+	endpoint = (endpoint_type == ARV_UV_ENDPOINT_CONTROL) ? priv->control_endpoint : priv->data_endpoint;
 
-	libusb_fill_bulk_transfer( transfer, uv_device->priv->usb_device, endpoint | endpoint_flags, data, size, callback, callback_data, timeout );
+	libusb_fill_bulk_transfer( transfer, priv->usb_device, endpoint | endpoint_flags, data, size, callback, callback_data, timeout );
 }
 
 gboolean
@@ -848,7 +849,7 @@ arv_uv_device_constructed (GObject *object)
 		reset_endpoint (priv->usb_device, priv->data_endpoint, LIBUSB_ENDPOINT_IN);
 
 	event_thread_run = 1;
-	event_thread = g_thread_new( "libusb events", event_thread_func, uv_device->priv->usb );
+	event_thread = g_thread_new( "libusb events", event_thread_func, priv->usb );
 }
 
 static void
