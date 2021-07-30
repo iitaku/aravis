@@ -86,6 +86,19 @@ G_DEFINE_TYPE_WITH_CODE (ArvUvDevice, arv_uv_device, ARV_TYPE_DEVICE, G_ADD_PRIV
 
 /* ArvUvDevice implementation */
 
+void arv_uv_device_fill_bulk_transfer (struct libusb_transfer* transfer, ArvUvDevice *uv_device,
+				ArvUvEndpointType endpoint_type, unsigned char endpoint_flags,
+				void *data, size_t size,
+				libusb_transfer_cb_fn callback, void* callback_data,
+				unsigned int timeout)
+{
+	guint8 endpoint;
+
+	endpoint = (endpoint_type == ARV_UV_ENDPOINT_CONTROL) ? uv_device->priv->control_endpoint : uv_device->priv->data_endpoint;
+
+	libusb_fill_bulk_transfer( transfer, uv_device->priv->usb_device, endpoint | endpoint_flags, data, size, callback, callback_data, timeout );
+}
+
 gboolean
 arv_uv_device_bulk_transfer (ArvUvDevice *uv_device, ArvUvEndpointType endpoint_type, unsigned char endpoint_flags, void *data,
 			     size_t size, size_t *transferred_size, guint32 timeout_ms, GError **error)
@@ -729,6 +742,22 @@ _open_usb_device (ArvUvDevice *uv_device, GError **error)
 	return TRUE;
 }
 
+static int event_thread_run = 1;
+static GThread* event_thread = NULL;
+
+static gpointer
+event_thread_func(void *ctx)
+{
+	struct timeval tv = { 0, 100 };
+
+    while (event_thread_run)
+	{
+        libusb_handle_events_timeout(ctx, &tv);
+	}
+
+    return NULL;
+}
+
 /**
  * arv_uv_device_new:
  * @vendor: USB3 vendor string
@@ -740,7 +769,6 @@ _open_usb_device (ArvUvDevice *uv_device, GError **error)
  *
  * Since: 0.8.0
  */
-
 ArvDevice *
 arv_uv_device_new (const char *vendor, const char *product, const char *serial_number, GError **error)
 {
@@ -799,7 +827,6 @@ arv_uv_device_constructed (GObject *object)
                 return;
         }
 
-
 	if ( !_bootstrap (uv_device)){
 		arv_device_take_init_error (ARV_DEVICE (uv_device),
                                             g_error_new (ARV_DEVICE_ERROR, ARV_DEVICE_ERROR_PROTOCOL_ERROR,
@@ -816,7 +843,12 @@ arv_uv_device_constructed (GObject *object)
                 return;
         }
 
-	reset_endpoint (priv->usb_device, priv->data_endpoint, LIBUSB_ENDPOINT_IN);
+	// FIXME: Async mode dosn't work with reset_endpoint
+	if (mode_sync)
+		reset_endpoint (priv->usb_device, priv->data_endpoint, LIBUSB_ENDPOINT_IN);
+
+	event_thread_run = 1;
+	event_thread = g_thread_new( "libusb events", event_thread_func, uv_device->priv->usb );
 }
 
 static void
@@ -834,6 +866,9 @@ arv_uv_device_finalize (GObject *object)
 {
 	ArvUvDevice *uv_device = ARV_UV_DEVICE (object);
 	ArvUvDevicePrivate *priv = arv_uv_device_get_instance_private (uv_device);
+
+	event_thread_run = 0;
+	g_thread_join( event_thread );
 
 	g_clear_object (&priv->genicam);
 
