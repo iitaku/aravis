@@ -124,14 +124,15 @@ arv_uv_stream_buffer_context_notify_transfer_completed (ArvUvStreamBufferContext
 	g_mutex_unlock( ctx->transfer_completed_mtx );
 }
 
-void arv_uv_stream_leader_cb (struct libusb_transfer *transfer)
+static void
+arv_uv_stream_leader_cb (struct libusb_transfer *transfer)
 {
 	ArvUvStreamBufferContext *ctx = transfer->user_data;
 	ArvUvspPacket *packet = (ArvUvspPacket*)transfer->buffer;
 
 	switch (transfer->status) {
 		case LIBUSB_TRANSFER_COMPLETED:
-			arv_uvsp_packet_debug (packet, ARV_DEBUG_LEVEL_LOG);
+			arv_uvsp_packet_debug (packet, ARV_DEBUG_LEVEL_DEBUG);
 
 			if (arv_uvsp_packet_get_packet_type (packet) != ARV_UVSP_PACKET_TYPE_LEADER) {
 				arv_warning_stream_thread ("Unexpected packet type (was expecting leader packet)");
@@ -159,14 +160,15 @@ void arv_uv_stream_leader_cb (struct libusb_transfer *transfer)
 	arv_uv_stream_buffer_context_notify_transfer_completed (ctx);
 }
 
-void arv_uv_stream_trailer_cb (struct libusb_transfer *transfer)
+static void
+arv_uv_stream_trailer_cb (struct libusb_transfer *transfer)
 {
 	ArvUvStreamBufferContext *ctx = transfer->user_data;
 	ArvUvspPacket *packet = (ArvUvspPacket*)transfer->buffer;
 
 	switch (transfer->status) {
 		case LIBUSB_TRANSFER_COMPLETED:
-			arv_uvsp_packet_debug (packet, ARV_DEBUG_LEVEL_LOG);
+			arv_uvsp_packet_debug (packet, ARV_DEBUG_LEVEL_DEBUG);
 
 			if (arv_uvsp_packet_get_packet_type (packet) != ARV_UVSP_PACKET_TYPE_TRAILER) {
 				arv_warning_stream_thread ("Unexpected packet type (was expecting trailer packet)");
@@ -174,7 +176,7 @@ void arv_uv_stream_trailer_cb (struct libusb_transfer *transfer)
 				break;
 			}
 
-			arv_log_stream_thread ("Total payload: %d bytes", ctx->total_payload_transferred);
+			arv_debug_stream_thread ("Total payload: %d bytes", (int)ctx->total_payload_transferred);
 			if (ctx->total_payload_transferred < ctx->buffer->priv->size) {
 				arv_warning_stream_thread ("Total payload smaller than expected");
 				ctx->buffer->priv->status = ARV_BUFFER_STATUS_MISSING_PACKETS;
@@ -205,7 +207,8 @@ void arv_uv_stream_trailer_cb (struct libusb_transfer *transfer)
 	arv_uv_stream_buffer_context_notify_transfer_completed (ctx);
 }
 
-void arv_uv_stream_payload_cb (struct libusb_transfer *transfer)
+static void
+arv_uv_stream_payload_cb (struct libusb_transfer *transfer)
 {
 	ArvUvStreamBufferContext *ctx = transfer->user_data;
 
@@ -358,13 +361,13 @@ arv_uv_stream_thread_async (void *data)
 	gint total_submitted_bytes = 0;
 	int i;
 
-	arv_log_stream_thread ("Start async USB3Vision stream thread");
-	arv_log_stream_thread ("leader_size = %d", thread_data->leader_size );
-	arv_log_stream_thread ("payload_size = %d", thread_data->payload_size );
-	arv_log_stream_thread ("trailer_size = %d", thread_data->trailer_size );
+	arv_debug_stream_thread ("Start async USB3Vision stream thread");
+	arv_debug_stream_thread ("leader_size = %d", thread_data->leader_size );
+	arv_debug_stream_thread ("payload_size = %d", thread_data->payload_size );
+	arv_debug_stream_thread ("trailer_size = %d", thread_data->trailer_size );
 
 	if (thread_data->callback != NULL)
-		thread_data->callback (thread_data->user_data, ARV_STREAM_CALLBACK_TYPE_INIT, NULL);
+		thread_data->callback (thread_data->callback_data, ARV_STREAM_CALLBACK_TYPE_INIT, NULL);
 
 	ctx_lookup = g_hash_table_new_full( g_direct_hash, g_direct_equal, NULL, arv_uv_stream_buffer_context_free );
 
@@ -386,7 +389,7 @@ arv_uv_stream_thread_async (void *data)
 
 		ArvUvStreamBufferContext* ctx = g_hash_table_lookup( ctx_lookup, buffer );
 		if (!ctx) {
-			arv_log_stream_thread ("Stream buffer context not found for buffer %p, creating...", buffer);
+			arv_debug_stream_thread ("Stream buffer context not found for buffer %p, creating...", buffer);
 
 			ctx = arv_uv_stream_buffer_context_new (buffer, thread_data, &total_submitted_bytes);
 
@@ -411,9 +414,9 @@ arv_uv_stream_thread_async (void *data)
 	g_hash_table_destroy (ctx_lookup);
 
 	if (thread_data->callback != NULL)
-		thread_data->callback (thread_data->user_data, ARV_STREAM_CALLBACK_TYPE_EXIT, NULL);
+		thread_data->callback (thread_data->callback_data, ARV_STREAM_CALLBACK_TYPE_EXIT, NULL);
 
-	arv_log_stream_thread ("Stop USB3Vision stream thread");
+	arv_debug_stream_thread ("Stop USB3Vision stream thread");
 
 	return NULL;
 }
@@ -555,13 +558,13 @@ arv_uv_stream_thread_sync (void *data)
 							if (packet == incoming_buffer)
 								memcpy (((char *) buffer->priv->data) + offset, packet, transferred);
 							offset += transferred;
-                                                        thread_data->n_transferred_bytes += transferred;
+                                                        thread_data->statistics.n_transferred_bytes += transferred;
 						} else {
 							buffer->priv->status = ARV_BUFFER_STATUS_SIZE_MISMATCH;
-                                                        thread_data->n_ignored_bytes += transferred;
+                                                        thread_data->statistics.n_ignored_bytes += transferred;
                                                 }
 					} else {
-                                                        thread_data->n_ignored_bytes += transferred;
+                                                        thread_data->statistics.n_ignored_bytes += transferred;
                                         }
 					break;
 				default:
@@ -760,7 +763,7 @@ arv_uv_stream_constructed (GObject *object)
 		      "callback", &thread_data->callback,
 		      "callback-data", &thread_data->callback_data,
 		      NULL);
-	
+
 	g_cond_init( &thread_data->stream_event );
 	g_mutex_init( &thread_data->stream_mtx );
 
@@ -770,16 +773,16 @@ arv_uv_stream_constructed (GObject *object)
 
 	priv->thread_data = thread_data;
 
-        arv_stream_declare_info (ARV_STREAM (uv_stream), "n_completed_buffers",
-                                 G_TYPE_UINT64, &thread_data->n_completed_buffers);
-        arv_stream_declare_info (ARV_STREAM (uv_stream), "n_failures",
-                                 G_TYPE_UINT64, &thread_data->n_failures);
-        arv_stream_declare_info (ARV_STREAM (uv_stream), "n_underruns",
-                                 G_TYPE_UINT64, &thread_data->n_underruns);
-        arv_stream_declare_info (ARV_STREAM (uv_stream), "n_transferred_bytes",
-                                 G_TYPE_UINT64, &thread_data->n_transferred_bytes);
-        arv_stream_declare_info (ARV_STREAM (uv_stream), "n_ignored_bytes",
-                                 G_TYPE_UINT64, &thread_data->n_ignored_bytes);
+    arv_stream_declare_info (ARV_STREAM (uv_stream), "n_completed_buffers",
+                             G_TYPE_UINT64, &thread_data->statistics.n_completed_buffers);
+    arv_stream_declare_info (ARV_STREAM (uv_stream), "n_failures",
+                             G_TYPE_UINT64, &thread_data->statistics.n_failures);
+    arv_stream_declare_info (ARV_STREAM (uv_stream), "n_underruns",
+                             G_TYPE_UINT64, &thread_data->statistics.n_underruns);
+    arv_stream_declare_info (ARV_STREAM (uv_stream), "n_transferred_bytes",
+                             G_TYPE_UINT64, &thread_data->statistics.n_transferred_bytes);
+    arv_stream_declare_info (ARV_STREAM (uv_stream), "n_ignored_bytes",
+                             G_TYPE_UINT64, &thread_data->statistics.n_ignored_bytes);
 
 	arv_uv_stream_start_thread (ARV_STREAM (uv_stream));
 }
@@ -793,16 +796,15 @@ arv_uv_stream_get_statistics (ArvStream *stream,
 				guint64 *n_underruns)
 {
 	ArvUvStream *uv_stream = ARV_UV_STREAM (stream);
+	ArvUvStreamPrivate *priv = arv_uv_stream_get_instance_private (uv_stream);
 	ArvUvStreamThreadData *thread_data;
 
-	thread_data = uv_stream->priv->thread_data;
+	thread_data = priv->thread_data;
 
 	*n_completed_buffers = thread_data->statistics.n_completed_buffers;
 	*n_failures = thread_data->statistics.n_failures;
 	*n_underruns = thread_data->statistics.n_underruns;
 }
-
-G_DEFINE_TYPE_WITH_CODE (ArvUvStream, arv_uv_stream, ARV_TYPE_STREAM, G_ADD_PRIVATE (ArvUvStream))
 
 static void
 arv_uv_stream_init (ArvUvStream *uv_stream)
@@ -836,7 +838,7 @@ arv_uv_stream_finalize (GObject *object)
 
 		g_atomic_int_set (&thread_data->cancel, TRUE);
 		g_cond_broadcast (&thread_data->stream_event);
-		g_thread_join (uv_stream->priv->thread);
+		g_thread_join (priv->thread);
 
 		g_mutex_clear (&thread_data->stream_mtx);
 		g_cond_clear (&thread_data->stream_event);
